@@ -1,6 +1,6 @@
 {
-  "name": "lib-pp",
-  "title": "Library - Path Planning",
+  "name": "lib-find-the-path",
+  "title": "Library - Find the Path",
   "description": "<p>Performs path-planning calculations. May be required by some modules to function.</p>",
   "author": "Dave of Wonders",
   "version": "1.0.0",
