@@ -29,6 +29,9 @@ export const AngleTypes =
 
 export function getTokenWidth (token_)
 {
+	if (! token_)
+		return 1;
+
 	const scale = canvas.grid.size;
 
 	let width = Math.floor (token_.w / scale);
@@ -37,6 +40,9 @@ export function getTokenWidth (token_)
 
 export function getTokenHeight (token_)
 {
+	if (! token_)
+		return 1;
+
 	const scale = canvas.grid.size;
 
 	const height = Math.floor (token_.h / scale);
@@ -85,7 +91,7 @@ export function getPointSetFromToken (token_)
 	return getPointSetFromCoord (origin.x, origin.y, getTokenWidth (token_), getTokenHeight (token_));
 }
 
-// Returns a new Point located at the center of... this point. 
+// Returns a new Point located at the center of a token
 export function getCenterPointFromToken (token_) { return getPoint (token_.x + token_.w / 2, token_.y + token_.h / 2); }
 
 // Represents a token's position as a point in grid-space rather than pixel-space and provides some useful methods.
@@ -107,6 +113,10 @@ export class Point
 		// todo: global setting
 		case ("dnd5e"):
 			this._metric = MinkowskiParameter.Chebyshev;
+			break;
+		default:
+			this._metric = MinkowskiParameter.Manhattan;
+			break;
 		}
 	}
 

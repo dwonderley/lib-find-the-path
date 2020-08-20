@@ -16,8 +16,14 @@ class PriorityQueue
 		return this.data.shift ();
 	}
 
-	push (item_)
+	push (item_, priorityMeasure_)
 	{
+		if (priorityMeasure_)
+		{
+			priorityMeasure_ (this.data, item_)
+			return;
+		}
+
 		for (let i = 0; i < this.data.length; ++i)
 		{
 			const curElement = this.data[i];
@@ -131,30 +137,29 @@ export class Path
 {
 	/*
 	 * @private
-	 * @param {Array<Point>} originSet_
-	 * @param {Array<Point>} destSet_
-	 * @param {Token} mookToken_
-	 * @param {MookModel} mookModel_
 	*/
 	constructor (data_)
 	{
 		this.originSet = data_.originSet;
 		this.destSet = data_.destSet;
-		this.mookToken = data_.mookToken;
-		this.mookModel = data_.mookModel;
+		this.token = data_.token;
 		this.pathLength = data_.movement;
 
-		this.tokenWidth = getTokenWidth (this.mookToken);
-		this.tokenHeight = getTokenHeight (this.mookToken);
+		this.width = data_.width ? data_.width : getTokenWidth (this.token);
+		this.height = data_.height ? data_.height : getTokenHeight (this.token);
 
 		this._path = new Array ();
+
+		// Todo: make this a function accepting the token and movement left in path? Usually, tokens can move through allied spaces but cannot stop in them. As is, tokens cannot move through allied spaces at all.
+		this._collisionMatters = true;
+		this._priorityMeasure = data_.priorityMeasure;
+
+		this.valid = false;
 	}
 
 	// A*
 	async findPath ()
 	{
-		console.time ("A* Search");
-
 		let frontier = new PriorityQueue ();
 		let visited = new Map ();
 		let n = new Node (this.originSet, this.destSet, 0);
@@ -165,29 +170,26 @@ export class Path
 		{
 			n = frontier.pop ();
 
-			if (n.prev && ! los (this.mookToken, n.prev.origin, n.origin))
+			if (n.prev && ! los (n.prev.origin, n.origin, this.width, this.height))
 				continue;
 
 			if (n.distToDest === 0)
 			{
-				console.timeEnd ("A* Search");
-				console.log ("Found path");
+				this.valid = true;
 				break;
 			}
 
-			// todo: use mook model to determine if collision matters
 			// Tokens with size > 1 have overlap when they move. We don't want them to colide with themselves
 			if (n.prev && n.originSet.filter (p => {
 				return ! n.prev.originSet.some (pp => pp.equals (p));
-			}).some (p => collision (this.mookToken, p, true)))
+			}).some (p => collision (this.token, p, this._collisionMatters)))
 			{
 				continue;
 			}
 
 			if (n.distTraveled > this.pathLength)
 			{
-				console.timeEnd ("A* Search");
-				console.log ("mookAI | Failed to find path to goal state");
+				console.log ("lib - Path Planner | Failed to find path to goal state");
 				// This is the first node that is out of range, so the previous node was valid
 				// todo: This won't hold because of tokens moving through other tokens' spaces
 				n = n.prev;
@@ -196,7 +198,7 @@ export class Path
  
 			// Since the goal point is checked for all points in the origin set against all points in the dest set, we only need to expand the origin node.
 			n.origin.neighbors ().map (p => {
-				let node = new Node (getPointSetFromCoord (p.x, p.y, this.tokenWidth, this.tokenHeight),
+				let node = new Node (getPointSetFromCoord (p.x, p.y, this.width, this.height),
 						     n.destSet,
 						     n.distTraveled + 1);
 				node.prev = n;
@@ -210,23 +212,21 @@ export class Path
 				visited.set (id, 1);
 				return true;
 			}).forEach (node => {
-				frontier.push (node);
+				frontier.push (node, this._priorityMeasure);
 			});
 		}
 
-		this.unwind (n);
+		return this.unwind (n);
 	}
 
 	unwind (node_)
 	{
-		this._path = new Array ();
+		let path = new Array ();
 
-		console.log ("Starting unwinding");
 		for (let n = node_; n !== null; n = n.prev)
-		{
-			console.log (n);
-			this._path.unshift (n);
-		}
+			path.unshift (n);
+
+		return path;
 	}
 
 	// Returns a subpath from the origin to the point on the path with distance dist_ away from the target
@@ -249,46 +249,65 @@ export class Path
 };
 
 /*
-Each mook has a PathManager, and each PathManager stores the path from the mook to each tracked token.
-Tokens are tracked through the addToken method below. This map is cleared and repopulated during each sensing step.
-Since the grids are 2d, I don't expect that path planning calculations will be excessive, but I'll keep an eye on it.
+The path manager should be unique per token. It stores the optimal path between the owning token and any number of target tokens. Targets are added through the addToken method below.
+It is intended, but not necessary, to clear the path manager before new calculations.
+Path calculations are fast, generally less than 3 ms from my testing.
 */
 export class PathManager
 {
-	constructor (mookModel_)
+	constructor ()
 	{
-		this.mookModel = mookModel_;
 		// _paths: id -> Path
 		this._paths = new Map ();
 		this._point = undefined;
 	}
 
-	static pathBetweenPoints (origin_, dest_)
+	static async pathFromData (data_)
 	{
+		return new Path (data_).findPath ();
 	}
 
-	async addToken (mookToken_, target_, movement_)
+	// A less general case of pathFromData. Finds a path between a source and destination Point. The origin_ has width_ and height_ in tiles. A valid path may be at most movement_ tiles long.
+	static async pathToPoint (origin_, dest_, width_, height_, movement_)
 	{
+		return new Path ({
+			"originSet": getPointSetFromCoord (origin_.x, origin_.y, width_, height_),
+			"destSet": getPointSetFromCoord (dest_.x, dest_.y, 1, 1),
+			"width": width_ ? width_ : 1,
+			"height": height_ ? height_ : 1,
+			"movement": movement_ ? movement_ : Infinity,
+			"token": null,
+		}).findPath ();
+	}
+
+	// Finds a path between two tokens that takes no more than movement_ tiles and stores it. If a path does not exist, it stores the best path it found, but that path is not marked "valid." Path validity should be checked as needed.
+	async addToken (token_, target_, movement_)
+	{
+		// It is not recommended to allow this
 		if (this._paths.has (target_.id))
 		{
-			console.log ("mookAI | Attempted to add existing token to path manager");
-			return;
+			console.log ("lib - Path Planner | Attempted to add existing token to path manager");
+			this_.paths.delete (target_.id);
 		}
 
+		// todo: support priority queue and collision settings
 		const p = new Path ({
-			"originSet": getPointSetFromToken (mookToken_),
+			"originSet": getPointSetFromToken (token_),
 			"destSet": getPointSetFromToken (target_),
-			"mookToken": mookToken_,
-			"mookModel": this.mookModel,
+			"token": token_,
 			"movement": movement_,
 		});
 
-		await p.findPath ();
+		p._path = await p.findPath ();
 
 		this._paths.set (target_.id, p);
 	}
 
-	// todo: Mook movement happens one square at a time. It should be possible to iterate over the set of paths and reassess which are valid. I'm also not sure that would save time.
+	addPath (id_, path_)
+	{
+		this._paths.set (id_, path_);
+	}
+
 	clear ()
 	{
 		this._paths.clear ();
@@ -305,26 +324,44 @@ export class PathManager
 */
 export function isTraversable (token_, oldPoint_, newPoint_, collisionMatters_)
 {
-	return los (token_, oldPoint_, newPoint_)
+	const w = getTokenWidth (token_);
+	const h = getTokenHeight (token_);
+
+	return los (oldPoint_, newPoint_, w, h)
 	       && ! collision (token_, newPoint_, collisionMatters_);
 }
 
-function los (token_, oldPoint_, newPoint_)
+function los (oldPoint_, newPoint_, width_, height_)
 {
 	if (! oldPoint_ || oldPoint_ === newPoint_)
 		return true;
 
-	const w = getTokenWidth (token_);
-	const h = getTokenHeight (token_);
+	if (! newPoint_)
+		return false;
 
-	const ps1 = getPointSetFromCoord (oldPoint_.x, oldPoint_.y, w, h);
-	const ps2 = getPointSetFromCoord (newPoint_.x, newPoint_.y, w, h);
+	const ps1 = getPointSetFromCoord (oldPoint_.x, oldPoint_.y, width_, height_);
+	const ps2 = getPointSetFromCoord (newPoint_.x, newPoint_.y, width_, height_);
 	
-	for (let i = 0; i < w; ++i)
-		for (let j = 0; j < h; ++j)
-			if (canvas.walls.checkCollision (new Ray({ x: ps1[i].cpx (1), y: ps1[j].cpy (1)},
-								 { x: ps2[i].cpx (1), y: ps2[j].cpy (1)})))
+	// A token may take up multiple tiles, and it moves by translation from an old set to a new set. A movement is valid if, for each translation, the old tile has line of sight on the new tile and each tile in the new set has los on every other tile in the set.
+	for (let i = 0; i < width_ * height_; ++i)
+	{
+		if (canvas.walls.checkCollision (new Ray({ x: ps1[i].cpx (1), y: ps1[i].cpy (1)},
+							 { x: ps2[i].cpx (1), y: ps2[i].cpy (1)})))
+			return false;
+
+		const p = { x: ps2[i].cpx (1), y: ps2[i].cpy (1) };
+
+		// If A has los on B then B has los on A, so we only need to check half of these
+		// todo: There must be a better way...
+		for (let j = i; j < width_ * height_; ++j)
+		{
+			if (i === j)
+				continue;
+
+			if (canvas.walls.checkCollision (new Ray(p, { x: ps2[j].cpx (1), y: ps2[j].cpy (1)})))
 				return false;
+		}
+	}
 
 	return true;
 }
@@ -337,7 +374,7 @@ function collision (token_, newPoint_, collisionMatters_)
 
 	for (let token of canvas.tokens.placeables)
 	{
-		if (token.id === token_.id)
+		if (token_ && token.id === token_.id)
 			continue;
 
 		if (getPointSetFromToken (token).some (p => newPoint_.equals (p)))
