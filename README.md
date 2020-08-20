@@ -4,7 +4,7 @@
 
 <p>This module is a work in progress, but I have tested it extensively. If you find bugs or have questions, comments, or requests, please don't hesitate to leave me a comment here or on the FVTT discord.</p>
 
-<p>See the wiki page for an example of this library's use.</p>
+<p>See the <a href="https://github.com/dwonderley/fvtt-lib-path-planner/wiki">wiki page</a> for an example of this library's use.</p>
 
 ## Functionality
 <p>A Point class that is agnostic to grid size. The Point class provides ways to calculate distances, rotations, and neighbors. It has constructors for the FVTT Token class, pixel coordinates, or Point coordinates. It can also return a set of contiguous Points if a token has width/height > 1.</p>
