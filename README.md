@@ -16,3 +16,6 @@
 <p>Line of sight and collision detection. The A* algorithm is implemented such that tokens will not move through walls or on top of other tokens.</p>
 
 <p>This module supports tokens with dimension > 1.</p>
+
+## Future Improvements
+<p>I plan to add support for hex tiles, custom heuristics, different priority measures, settings, and better handling of collision, line of sight, attack range, and failure to find paths.</p>
