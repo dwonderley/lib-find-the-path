@@ -143,7 +143,7 @@ export class Path
 		this.originSet = data_.originSet;
 		this.destSet = data_.destSet;
 		this.token = data_.token;
-		this.pathLength = data_.movement;
+		this.maxPathLength = data_.movement;
 
 		this.width = data_.width ? data_.width : getTokenWidth (this.token);
 		this.height = data_.height ? data_.height : getTokenHeight (this.token);
@@ -187,7 +187,7 @@ export class Path
 				continue;
 			}
 
-			if (n.distTraveled > this.pathLength)
+			if (n.distTraveled > this.maxPathLength)
 			{
 				console.log ("lib - Path Planner | Failed to find path to goal state");
 				// This is the first node that is out of range, so the previous node was valid
@@ -216,17 +216,15 @@ export class Path
 			});
 		}
 
-		return this.unwind (n);
+		this.unwind (n);
 	}
 
 	unwind (node_)
 	{
-		let path = new Array ();
+		this._path = new Array ();
 
 		for (let n = node_; n !== null; n = n.prev)
-			path.unshift (n);
-
-		return path;
+			this._path.unshift (n);
 	}
 
 	// Returns a subpath from the origin to the point on the path with distance dist_ away from the target
@@ -246,6 +244,7 @@ export class Path
 	}
 
 	get length () { return this._path.length; }
+	get path () { return this._path; }
 };
 
 /*
@@ -255,8 +254,10 @@ Path calculations are fast, generally less than 3 ms from my testing.
 */
 export class PathManager
 {
-	constructor ()
+	constructor (token_)
 	{
+		this._token = token_;
+
 		// _paths: id -> Path
 		this._paths = new Map ();
 		this._point = undefined;
@@ -264,24 +265,28 @@ export class PathManager
 
 	static async pathFromData (data_)
 	{
-		return new Path (data_).findPath ();
+		const p = new Path (data_);
+		await p.findPath ();
+		return p;
 	}
 
 	// A less general case of pathFromData. Finds a path between a source and destination Point. The origin_ has width_ and height_ in tiles. A valid path may be at most movement_ tiles long.
 	static async pathToPoint (origin_, dest_, width_, height_, movement_)
 	{
-		return new Path ({
+		const p = new Path ({
 			"originSet": getPointSetFromCoord (origin_.x, origin_.y, width_, height_),
 			"destSet": getPointSetFromCoord (dest_.x, dest_.y, 1, 1),
 			"width": width_ ? width_ : 1,
 			"height": height_ ? height_ : 1,
 			"movement": movement_ ? movement_ : Infinity,
 			"token": null,
-		}).findPath ();
+		});
+		await p.findPath ();
+		return p;
 	}
 
 	// Finds a path between two tokens that takes no more than movement_ tiles and stores it. If a path does not exist, it stores the best path it found, but that path is not marked "valid." Path validity should be checked as needed.
-	async addToken (token_, target_, movement_)
+	async addToken (target_, movement_)
 	{
 		// It is not recommended to allow this
 		if (this._paths.has (target_.id))
@@ -292,13 +297,13 @@ export class PathManager
 
 		// todo: support priority queue and collision settings
 		const p = new Path ({
-			"originSet": getPointSetFromToken (token_),
+			"originSet": getPointSetFromToken (this._token),
 			"destSet": getPointSetFromToken (target_),
-			"token": token_,
+			"token": this._token,
 			"movement": movement_,
 		});
 
-		p._path = await p.findPath ();
+		await p.findPath ();
 
 		this._paths.set (target_.id, p);
 	}
