@@ -1,4 +1,4 @@
-import { Point, getPointFromToken, getPointSetFromToken, getPointSetFromCoord, getTokenHeight, getTokenWidth } from "./point.js"
+import { PointFactory, getTokenHeight, getTokenWidth, MinkowskiParameter } from "./point.js"
 
 // Because apparently JS doesn't have this built in...
 /*
@@ -87,6 +87,12 @@ class PriorityQueue
 		this.data.push (item_);
 	}
 
+	log (depth_ = 5)
+	{
+		for (let i = 0; i < Math.min (depth_, this.length); ++i)
+			console.log (this.data[i]);
+	}
+
 	get length () { return this.data.length; }
 };
 
@@ -95,30 +101,23 @@ class PriorityQueue
 */
 class Node
 {
-	constructor (originSet_, destSet_, distTraveled_)
+	constructor (origin_, dest_, distTraveled_, prev_ = null)
 	{
-		this.originSet = originSet_;
-		this.destSet = destSet_;
+		this._origin = origin_;
+		this._dest = dest_;
 		this.distTraveled = distTraveled_;
-		this.distToDest = Math.min (...this.originSet.map (p1 => {
-			return Math.min (...this.destSet.map (p2 => p1.distToPoint (p2)));
+		this.distToDest = Math.min (...this.origin.pointSet.map (p1 => {
+			return Math.min (...this.dest.pointSet.map (p2 => p1.distToPoint (p2)));
 		}));
 		this.cost = this.distTraveled + this.distToDest;
 
-		this.prev = null;
+		this.prev = prev_;
 	}
 
 	// Tokens of all sizes are represented by their upper-left point (index 0), a width, and a height
-	get dest ()
-	{
-		return this.destSet[0];
-	}
-
+	get dest () { return this._dest; }
 	// Tokens of all sizes are represented by their upper-left point (index 0), a width, and a height
-	get origin ()
-	{
-		return this.originSet[0];
-	}
+	get origin () { return this._origin; }
 
 	// Since all points in a set move as one, we can represent the entire collection with a single id
 	get id ()
@@ -140,8 +139,8 @@ export class Path
 	*/
 	constructor (data_)
 	{
-		this.originSet = data_.originSet;
-		this.destSet = data_.destSet;
+		this.origin = data_.origin;
+		this.dest = data_.dest;
 		this.token = data_.token;
 		this.maxPathLength = data_.movement;
 
@@ -162,7 +161,7 @@ export class Path
 	{
 		let frontier = new PriorityQueue ();
 		let visited = new Map ();
-		let n = new Node (this.originSet, this.destSet, 0);
+		let n = new Node (this.origin, this.dest, 0);
 
 		frontier.push (n);
 
@@ -180,8 +179,8 @@ export class Path
 			}
 
 			// Tokens with size > 1 have overlap when they move. We don't want them to colide with themselves
-			if (n.prev && n.originSet.filter (p => {
-				return ! n.prev.originSet.some (pp => pp.equals (p));
+			if (n.prev && n.origin.pointSet.filter (p => {
+				return ! n.prev.origin.pointSet.some (pp => pp.equals (p));
 			}).some (p => collision (this.token, p, this._collisionMatters)))
 			{
 				continue;
@@ -198,11 +197,10 @@ export class Path
  
 			// Since the goal point is checked for all points in the origin set against all points in the dest set, we only need to expand the origin node.
 			n.origin.neighbors ().map (p => {
-				let node = new Node (getPointSetFromCoord (p.x, p.y, this.width, this.height),
-						     n.destSet,
-						     n.distTraveled + 1);
-				node.prev = n;
-				return node;
+				return new Node (PointFactory.fromPoint (p),
+						 n.dest,
+						 n.distTraveled + 1,
+						 n);
 			}).filter (node => {
 				const id = node.id;
 
@@ -247,20 +245,14 @@ export class Path
 	get path () { return this._path; }
 };
 
-/*
-The path manager should be unique per token. It stores the optimal path between the owning token and any number of target tokens. Targets are added through the addToken method below.
-It is intended, but not necessary, to clear the path manager before new calculations.
-Path calculations are fast, generally less than 3 ms from my testing.
-*/
 export class PathManager
 {
-	constructor (token_)
+	constructor (metric_)
 	{
-		this._token = token_;
+		this._pointFactory = new PointFactory (metric_);
 
-		// _paths: id -> Path
+		// _paths: tokenId -> (targetId -> Path)
 		this._paths = new Map ();
-		this._point = undefined;
 	}
 
 	static async pathFromData (data_)
@@ -271,13 +263,13 @@ export class PathManager
 	}
 
 	// A less general case of pathFromData. Finds a path between a source and destination Point. The origin_ has width_ and height_ in tiles. A valid path may be at most movement_ tiles long.
-	static async pathToPoint (origin_, dest_, width_, height_, movement_)
+	static async pathToPoint (origin_, dest_, movement_)
 	{
 		const p = new Path ({
-			"originSet": getPointSetFromCoord (origin_.x, origin_.y, width_, height_),
-			"destSet": getPointSetFromCoord (dest_.x, dest_.y, 1, 1),
-			"width": width_ ? width_ : 1,
-			"height": height_ ? height_ : 1,
+			"origin": origin_,
+			"dest": dest_,
+			"width": origin_.width,
+			"height": origin_.height,
 			"movement": movement_ ? movement_ : Infinity,
 			"token": null,
 		});
@@ -286,41 +278,51 @@ export class PathManager
 	}
 
 	// Finds a path between two tokens that takes no more than movement_ tiles and stores it. If a path does not exist, it stores the best path it found, but that path is not marked "valid." Path validity should be checked as needed.
-	async addToken (target_, movement_)
+	async addToken (token_, target_, movement_)
 	{
+		if (! this._paths.has (token_.id))
+			this._paths.set (token_.id, new Map ());
+
+		let tokenPaths = this._paths.get (token_.id);
+
 		// It is not recommended to allow this
-		if (this._paths.has (target_.id))
+		if (tokenPaths.has (target_.id))
 		{
-			console.log ("lib - Path Planner | Attempted to add existing token to path manager");
-			this_.paths.delete (target_.id);
+			console.log ("lib - Path Planner | Attempted to add existing target (%s) "
+				     + "to path manager for token (%s)",
+				     target_.id, token_.id);
+			tokenPaths.delete (target_.id);
 		}
 
 		// todo: support priority queue and collision settings
 		const p = new Path ({
-			"originSet": getPointSetFromToken (this._token),
-			"destSet": getPointSetFromToken (target_),
+			"origin": this._pointFactory.fromToken (token_),
+			"dest": this._pointFactory.fromToken (target_),
 			"token": this._token,
 			"movement": movement_,
 		});
 
 		await p.findPath ();
 
-		this._paths.set (target_.id, p);
+		tokenPaths.set (target_.id, p);
+		// Hooks.call ("FoundThePathToToken", token_.id);
 	}
 
-	addPath (id_, path_)
+	// Add an existing path from a token to a target
+	addPath (tokenId_, targetId_, path_)
 	{
-		this._paths.set (id_, path_);
+		this._paths.get(tokenId_).set (targetId_, path_);
 	}
 
-	clear ()
-	{
-		this._paths.clear ();
-	}
+	// Clear all paths originating from a token
+	clear (tokenId_) { this._paths.get (tokenId_).clear (); }
+	// Clear all paths for all tokens
+	clearAll () { this._paths.clear (); }
 
-	path (id_) { return this._paths.get (id_);}
-
-	get paths () { return this._paths; }
+	// Get all of the paths for a particular token
+	paths (id_) { return this._paths.get (id_); }
+	// Get the path from a token to a target
+	path (tokenId_, targetId_) { return this.paths (tokenId_)?.get (targetId_);}
 };
 
 /*
@@ -329,14 +331,11 @@ export class PathManager
 */
 export function isTraversable (token_, oldPoint_, newPoint_, collisionMatters_)
 {
-	const w = getTokenWidth (token_);
-	const h = getTokenHeight (token_);
-
-	return los (oldPoint_, newPoint_, w, h)
+	return los (oldPoint_, newPoint_)
 	       && ! collision (token_, newPoint_, collisionMatters_);
 }
 
-function los (oldPoint_, newPoint_, width_, height_)
+function los (oldPoint_, newPoint_)
 {
 	if (! oldPoint_ || oldPoint_ === newPoint_)
 		return true;
@@ -344,26 +343,26 @@ function los (oldPoint_, newPoint_, width_, height_)
 	if (! newPoint_)
 		return false;
 
-	const ps1 = getPointSetFromCoord (oldPoint_.x, oldPoint_.y, width_, height_);
-	const ps2 = getPointSetFromCoord (newPoint_.x, newPoint_.y, width_, height_);
+	const ps1 = oldPoint_.pointSet;
+	const ps2 = newPoint_.pointSet;
 	
 	// A token may take up multiple tiles, and it moves by translation from an old set to a new set. A movement is valid if, for each translation, the old tile has line of sight on the new tile and each tile in the new set has los on every other tile in the set.
-	for (let i = 0; i < width_ * height_; ++i)
+	for (let i = 0; i < oldPoint_.width * oldPoint_.height; ++i)
 	{
-		if (canvas.walls.checkCollision (new Ray({ x: ps1[i].cpx (1), y: ps1[i].cpy (1)},
-							 { x: ps2[i].cpx (1), y: ps2[i].cpy (1)})))
+		if (canvas.walls.checkCollision (new Ray({ x: ps1[i].cpx, y: ps1[i].cpy},
+							 { x: ps2[i].cpx, y: ps2[i].cpy})))
 			return false;
 
-		const p = { x: ps2[i].cpx (1), y: ps2[i].cpy (1) };
+		const p = { x: ps2[i].cpx, y: ps2[i].cpy };
 
 		// If A has los on B then B has los on A, so we only need to check half of these
 		// todo: There must be a better way...
-		for (let j = i; j < width_ * height_; ++j)
+		for (let j = i; j < newPoint_.width * newPoint_.height; ++j)
 		{
 			if (i === j)
 				continue;
 
-			if (canvas.walls.checkCollision (new Ray(p, { x: ps2[j].cpx (1), y: ps2[j].cpy (1)})))
+			if (canvas.walls.checkCollision (new Ray(p, { x: ps2[j].cpx, y: ps2[j].cpy})))
 				return false;
 		}
 	}
@@ -377,14 +376,37 @@ function collision (token_, newPoint_, collisionMatters_)
 	if (! collisionMatters_)
 		return false;
 
+	const pf = new PointFactory (newPoint_._metric);
+
 	for (let token of canvas.tokens.placeables)
 	{
 		if (token_ && token.id === token_.id)
 			continue;
 
-		if (getPointSetFromToken (token).some (p => newPoint_.equals (p)))
+		if (pf.setFromToken (token).some (p => newPoint_.equals (p)))
 			return true;
 	}
 
 	return false;
 }
+
+Hooks.on ("ready", () =>
+{
+	if (! game.FindThePath)
+	{
+		game.FindThePath = {
+			"Chebyshev": {},
+			"Euclidean": {},
+			"Manhattan": {}
+		};
+	}
+
+	game.FindThePath.Chebyshev.PointFactory = new PointFactory (MinkowskiParameter.Chebyshev);
+	game.FindThePath.Chebyshev.PathManager = new PathManager (MinkowskiParameter.Chebyshev);
+
+	game.FindThePath.Euclidean.PointFactory = new PointFactory (MinkowskiParameter.Euclidean);
+	game.FindThePath.Euclidean.PathManager = new PathManager (MinkowskiParameter.Euclidean);
+
+	game.FindThePath.Manhattan.PathManager = new PathManager (MinkowskiParameter.Manhattan);
+	game.FindThePath.Manhattan.PointFactory = new PointFactory (MinkowskiParameter.Manhattan);
+});

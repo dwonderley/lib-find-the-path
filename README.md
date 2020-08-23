@@ -1,4 +1,12 @@
 # lib-find-the-path
+## Changelog
+<p>Big, breaking refactor for general improvements, code cleanliness, stability, etc...</p>
+<ol>
+  <li>Path planning can now be done from macros. See the <a href="https://github.com/dwonderley/lib-find-the-path/wiki">wiki page</a> for more information.</li>
+  <li>Added a PoinFactory class that makes creating and using Point objects much easier.</li>
+  <li>Added instances of the PathManager and PathFactory classes to game.FindThePath.X.PathManager for general access, where X is the type of distance metric (Chebyshev, Euclidean, or Manhattan).
+</ol>
+
 ## Summary
 <p>This module provides a library that performs system-agnostic path planning calculations for two-dimensional, square grids.</p>
 
@@ -6,7 +14,7 @@
 
 <p>See the <a href="https://github.com/dwonderley/lib-find-the-path/wiki">wiki page</a> for examples of this library's use.</p>
 
-<p>This module is a work in progress, but I have tested it extensively. If you find bugs or have questions, comments, or requests, please don't hesitate to leave me a comment here or on the FVTT discord.</p>
+<p>This module is a work in progress, but I have tested it extensively. If you find bugs or have questions, comments, or requests, please don't hesitate to leave me a comment here or on the FVTT discord (@Dave Of Wonders).</p>
 
 ## Terminology
 Token is a FVTT class that contains various information about game tokens, such as their pixel coordinates, the actors they represent, or their names. Tokens exist on the Canvas. The Canvas is a grid of pixel coordinates, originating at the top-left corner, with +x going left to right and +y going top to bottom. 
@@ -17,11 +25,13 @@ However, because different maps may have different sizes or pixel counts per gri
 
 A Point is a wrapper around a pair of grid coordinates. It provides several helpful methods, starting with conversions from Tokens, pixel coordinates, and grid coordinates into a Point object, where calculations can be done more simply.
 
+The PointFactory handles the actual creation of points. It is strongly recommended, as it is more convenient, consistent, and concise than manual construction. The PointFactory needs to be told on construction how distances should be measured between Points. It will only generate points of that type, and it will make sure the size of PointSets (and other data) is managed consistently.
+
 A PointSet is an informal term for an Array of Points. Usually, it is used to represent a Token that has a dimension > 1. It is not a defined class, but it may become one if there is a use for it. These Arrays are provided by methods such as getPointSetFromToken and should not be manually.
 
 A Path is a wrapper around an array of Nodes. Nodes are a private class that do not need to be accessed or constructed, but loosely speaking, they are the path planning equivalent of Points. The path between two Points can be accessed by the Path object's path () method.
 
-The PathManager is a tool used to find and track planned paths. It provides two static methods to compute arbitrary paths, but it's standard usage is to compute paths between Tokens. Using the addToken method, a user can find the path from a Token to a new target Token. This path is stored by the PathManager and accessed by the target's ID. PathManagers should be unique for every Token to avoid collisions.
+The PathManager is a tool used to find and track planned paths. It provides two static methods to compute arbitrary paths, but it's standard usage is to compute paths between Tokens. Using the addToken method, a user can find the path from a Token to a new target Token. This path is stored by the PathManager and accessed by the source and destination token IDs.
 
 Line of Sight (LoS) is the concept that a line drawn from the center of one grid coordinate to the center of another is unobstructed. Collision is the concept of two tokens occupying the same grid space. A Node is said to be traversable if it is a neighbor of the current Node, if there is line of sight between corresponding Points in the origin and destination PointSets, all Points in the destination PointSet, and if there are no collisions in the destination PointSet. This is not the best definition, but it's a WIP.
 
