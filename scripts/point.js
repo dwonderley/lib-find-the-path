@@ -106,13 +106,17 @@ export class Point
 	{
 		if (data_.px)
 			this._x = data_.px / this.scale;
-		else
+		else if (data_.x)
 			this._x = data_.x;
+		else
+			this._x = 0;
 
 		if (data_.py)
 			this._y = data_.py / this.scale;
-		else
+		else if (data_.y)
 			this._y = data_.y;
+		else
+			this._y = 0;
 
 		this._w = data_.width ? data_.width : 1;
 		this._h = data_.height ? data_.height : 1;
@@ -303,12 +307,18 @@ export class Point
 	}
 
 	// In JS, numbers are not references, so we have to update these when they change
-	update (px_, py_, width_, height_)
+	update (changes_)
 	{
-		this._x = px_ / this.scale;
-		this._y = py_ / this.scale;
-		this._w = width_ ? width_ / this.scale: 1;
-		this._h = height_ ? height_ / this.scale : 1;
+		if (changes_.x !== undefined)
+			this._x = changes_.x / this.scale;
+		if (changes_.y !== undefined)
+			this._y = changes_.y / this.scale;
+		if (changes_.w !== undefined)
+			this._w = changes_.w / this.scale;
+		if (changes_.h !== undefined)
+			this._h = changes_.h / this.scale;
+
+		this._pointSet = new Array ();
 	}
 
 	get x () { return this._x; }

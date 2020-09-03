@@ -188,7 +188,7 @@ export class Path
 
 			if (n.distTraveled > this.maxPathLength)
 			{
-				console.log ("lib - Path Planner | Failed to find path to goal state");
+				console.log ("FindThePath | Failed to find path to goal state");
 				// This is the first node that is out of range, so the previous node was valid
 				// todo: This won't hold because of tokens moving through other tokens' spaces
 				n = n.prev;
@@ -288,7 +288,7 @@ export class PathManager
 		// It is not recommended to allow this
 		if (tokenPaths.has (target_.id))
 		{
-			console.log ("lib - Path Planner | Attempted to add existing target (%s) "
+			console.log ("FindThePath | Attempted to add existing target (%s) "
 				     + "to path manager for token (%s)",
 				     target_.id, token_.id);
 			tokenPaths.delete (target_.id);
@@ -302,6 +302,7 @@ export class PathManager
 			"movement": movement_,
 		});
 
+		console.log ("FindThePath | Searching for path between tokens %s and %s", token_.id, target_.id);
 		await p.findPath ();
 
 		tokenPaths.set (target_.id, p);
