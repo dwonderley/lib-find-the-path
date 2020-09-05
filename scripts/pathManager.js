@@ -1,4 +1,5 @@
 import { PointFactory, getTokenHeight, getTokenWidth, MinkowskiParameter } from "./point.js"
+import { FTPUtility } from "./utility.js"
 
 // Because apparently JS doesn't have this built in...
 /*
@@ -150,7 +151,7 @@ export class Path
 		this._path = new Array ();
 
 		// Todo: make this a function accepting the token and movement left in path? Usually, tokens can move through allied spaces but cannot stop in them. As is, tokens cannot move through allied spaces at all.
-		this._collisionMatters = true;
+		this._collisionConfig = { checkCollision: true, token: this.token };
 		this._priorityMeasure = data_.priorityMeasure;
 
 		this.valid = false;
@@ -169,7 +170,7 @@ export class Path
 		{
 			n = frontier.pop ();
 
-			if (n.prev && ! los (n.prev.origin, n.origin, this.width, this.height))
+			if (n.prev && ! FTPUtility.los (n.prev.origin, n.origin))
 				continue;
 
 			if (n.distToDest === 0)
@@ -181,7 +182,7 @@ export class Path
 			// Tokens with size > 1 have overlap when they move. We don't want them to colide with themselves
 			if (n.prev && n.origin.pointSet.filter (p => {
 				return ! n.prev.origin.pointSet.some (pp => pp.equals (p));
-			}).some (p => collision (this.token, p, this._collisionMatters)))
+			}).some (p => FTPUtility.collision (p, this._collisionConfig)))
 			{
 				continue;
 			}
@@ -298,7 +299,7 @@ export class PathManager
 		const p = new Path ({
 			"origin": this._pointFactory.fromToken (token_),
 			"dest": this._pointFactory.fromToken (target_),
-			"token": this._token,
+			"token": token_,
 			"movement": movement_,
 		});
 
@@ -306,7 +307,6 @@ export class PathManager
 		await p.findPath ();
 
 		tokenPaths.set (target_.id, p);
-		// Hooks.call ("FoundThePathToToken", token_.id);
 	}
 
 	// Add an existing path from a token to a target
@@ -325,71 +325,6 @@ export class PathManager
 	// Get the path from a token to a target
 	path (tokenId_, targetId_) { return this.paths (tokenId_)?.get (targetId_);}
 };
-
-/*
-* @param {Token} start_
-* @param {Point} point_
-*/
-export function isTraversable (token_, oldPoint_, newPoint_, collisionMatters_)
-{
-	return los (oldPoint_, newPoint_)
-	       && ! collision (token_, newPoint_, collisionMatters_);
-}
-
-function los (oldPoint_, newPoint_)
-{
-	if (! oldPoint_ || oldPoint_ === newPoint_)
-		return true;
-
-	if (! newPoint_)
-		return false;
-
-	const ps1 = oldPoint_.pointSet;
-	const ps2 = newPoint_.pointSet;
-	
-	// A token may take up multiple tiles, and it moves by translation from an old set to a new set. A movement is valid if, for each translation, the old tile has line of sight on the new tile and each tile in the new set has los on every other tile in the set.
-	for (let i = 0; i < oldPoint_.width * oldPoint_.height; ++i)
-	{
-		if (canvas.walls.checkCollision (new Ray({ x: ps1[i].cpx, y: ps1[i].cpy},
-							 { x: ps2[i].cpx, y: ps2[i].cpy})))
-			return false;
-
-		const p = { x: ps2[i].cpx, y: ps2[i].cpy };
-
-		// If A has los on B then B has los on A, so we only need to check half of these
-		// todo: There must be a better way...
-		for (let j = i; j < newPoint_.width * newPoint_.height; ++j)
-		{
-			if (i === j)
-				continue;
-
-			if (canvas.walls.checkCollision (new Ray(p, { x: ps2[j].cpx, y: ps2[j].cpy})))
-				return false;
-		}
-	}
-
-	return true;
-}
-
-// todo: replace collisionMatters bool with function?
-function collision (token_, newPoint_, collisionMatters_)
-{
-	if (! collisionMatters_)
-		return false;
-
-	const pf = new PointFactory (newPoint_._metric);
-
-	for (let token of canvas.tokens.placeables)
-	{
-		if (token_ && token.id === token_.id)
-			continue;
-
-		if (pf.setFromToken (token).some (p => newPoint_.equals (p)))
-			return true;
-	}
-
-	return false;
-}
 
 Hooks.on ("ready", () =>
 {

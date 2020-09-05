@@ -249,7 +249,9 @@ export class Point
 		let maxRDist = Math.PI;
 		let closestNeighbor;
 
-		for (let n of (new TokenPoint (target_)).neighbors ())
+		const pf = new PointFactory (this.metric)
+
+		for (let n of pf.fromToken (target_).neighbors ())
 		{
 			const dist = Point.Euclidean(this, n);
 			const rDist = Math.abs (this.radialDistToPoint (n, rotation_));
@@ -303,7 +305,7 @@ export class Point
 
 	radialDistToToken (token_, rotation_, angleType_)
 	{
-		return this.radialDistToPoint (new TokenPoint (token_), rotation_, angleType_);
+		return this.radialDistToPoint ((new PointFactory (this.metric)).fromToken (token_), rotation_, angleType_);
 	}
 
 	// In JS, numbers are not references, so we have to update these when they change

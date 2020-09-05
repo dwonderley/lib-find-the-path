@@ -1,5 +1,32 @@
 # lib-find-the-path
 ## Changelog
+1.2.0
+<ol>
+<li>Added FTPUtility class that exposes useful methods
+  <ol>
+  <li>Added traverse method that moves a token along its calculated path</li>
+  <li>Added moveTokenToPoint method</li>
+    <ol>
+    <li>Moves a token to the location provided by a Point object</li>
+    <li>Checks line of sight and collison before movement</li>
+    </ol>
+  <li>Moved line of sight, collison detection, and isTraversable methods into utility class</li>
+  </ol>
+<li>Changed collison detection method to take in a configuration object</li>
+  <ol>
+  <li>The checkCollision option can turn collision checking off</li>
+  <li>The token option omits a token from the collision check (prevents a token from colliding with itself)</li>
+  <li>In the future, this will allow the user to selectively filter what constitutes a collision</li>
+    <ol>
+      <li>Can a token move through an allied space or not?</li>
+      <li>Can a token stop in an allied space?</li>
+      <li>Can a token move through enemy tokens?</li>
+    </ol>
+  </ol>
+<li>Various bug fixes</li>
+</ol>
+
+1.1.2
 <p>Big, breaking refactor for general improvements, code cleanliness, stability, etc...</p>
 <ol>
   <li>Path planning can now be done from macros. See the <a href="https://github.com/dwonderley/lib-find-the-path/wiki">wiki page</a> for more information.</li>
@@ -45,6 +72,8 @@ Line of Sight (LoS) is the concept that a line drawn from the center of one grid
 <p>Line of sight and collision detection. The A* algorithm is implemented such that tokens will not move through walls or on top of other tokens.</p>
 
 <p>This module supports tokens with dimension > 1.</p>
+
+<p>This module can calculate a path for a token and then move that token along that path.</p>
 
 ## Future Improvements
 <p>I plan to add support for hex tiles, custom heuristics, different priority measures, settings, and better handling of collision, line of sight, attack range, and failure to find paths.</p>
