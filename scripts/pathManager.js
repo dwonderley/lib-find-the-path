@@ -1,4 +1,4 @@
-import { PointFactory, getTokenHeight, getTokenWidth, MinkowskiParameter } from "./point.js"
+import { Point, PointFactory, getTokenHeight, getTokenWidth, MinkowskiParameter } from "./point.js"
 import { FTPUtility } from "./utility.js"
 
 // Because apparently JS doesn't have this built in...
@@ -137,9 +137,23 @@ export class Path
 {
 	/*
 	 * @private
+	 * @throws
 	*/
 	constructor (data_)
 	{
+		if (! data_.origin || (! data_.origin instanceof Point)
+		    || ! data_.dest || ! data_.dest instanceof Point)
+			throw "FindThePath | Invalid Path initialization: bad start/goal Point";
+
+		const isValidNumber = (thing_) => { return thing_ !== undefined && typeof(thing_) === "number"; }
+		const isValidPosNumber = (thing_) => { return isValidNumber (thing_) && thing_ >= 0; }
+
+		if (! isValidPosNumber (data_.movement))
+			throw "FindThePath | Invalid Path initialization: bad search range";
+
+		if (! data_.token && ! (isValidPosNumber (data_.width) && isValidPosNumber (data_.height)))
+			throw "FindThePath | Invalid Path initialization: must provide width/height or token";
+
 		this.origin = data_.origin;
 		this.dest = data_.dest;
 		this.token = data_.token;

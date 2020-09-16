@@ -33,7 +33,7 @@ export class FTPUtility
 	// Checks if a token could be moved from oldPoint_ to newPoint_
 	static isTraversable (oldPoint_, newPoint_, collisionConfig_ = FTPUtility.defaultCollisionConfig ())
 	{
-		return ! collision (newPoint_, collisionConfig_) && los (oldPoint_, newPoint_);
+		return ! FTPUtility.collision (newPoint_, collisionConfig_) && FTPUtility.los (oldPoint_, newPoint_);
 	}
 	
 	// Moves a token_ to the specified point_
@@ -88,10 +88,16 @@ export class FTPUtility
 
 		// Calculate the angular distance to the destination grid space
 		const dTheta = cur.radialDistToPoint (point_, token_.data.rotation, AngleTypes.DEG);
-		// Rotate the token to face the direction it moves in
-		await token_.update ({ rotation: (token_.data.rotation + dTheta) % 360 });
-		// Wait between rotating and moving
-		await new Promise (resolve => setTimeout (resolve, rotateWait_));
+
+		if (dTheta)
+		{
+			// Rotate the token to face the direction it moves in
+			await token_.update ({ rotation: (token_.data.rotation + dTheta) % 360 }).then ((resolve, reject) => 
+			{ 
+				// Wait between rotating and moving
+				return new Promise (resolve => setTimeout (resolve, dTheta / 360 * rotateWait_));
+			});
+		}
 
 		let error = false;
 
@@ -133,8 +139,7 @@ export class FTPUtility
 		// pathToTraverse[i = 0] is the current point
 		for (let i = 1; i < pathToTraverse.length; ++i)
 		{
-			const p = pathToTraverse[i];
-			const success = await this.constructor.moveTokenToPoint (token, p, rotateWait_);
+			const success = await this.constructor.moveTokenToPoint (token, pathToTraverse[i], rotateWait_)
 
 			if (! success)
 			{
