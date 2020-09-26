@@ -9,7 +9,7 @@ export const MinkowskiParameter =
 }
 
 // Relative degree offsets for neighboring *squares* in this bearing-based coordinate system
-export const Neighbors =
+export const SquareNeighborAngles =
 {
 	forward: 0,
 	fRight: 45,
@@ -36,7 +36,8 @@ export function getTokenWidth (token_)
 	if (! token_)
 		return 1;
 
-	let width = Math.floor (token_.w / canvas.grid.size);
+	// Round width to nearest quarter tile
+	let width = Math.round (4 * token_.w / canvas.grid.size) / 4;
 	return width ? width : 1;
 }
 
@@ -45,14 +46,9 @@ export function getTokenHeight (token_)
 	if (! token_)
 		return 1;
 
-	const height = Math.floor (token_.h / canvas.grid.size);
+	// Round height to nearest quarter tile
+	const height = Math.round (4 * token_.h / canvas.grid.size) / 4;
 	return height ? height : 1;
-}
-
-// Tokens are rectangular. This means that if the first and last Points lie within the canvas then all of them do.
-export function isPointSetValid (ps_)
-{
-	return ps_ && ps_[0] && ps_[ps_.length - 1];
 }
 
 // Returns the neighbors of a Point point_
@@ -63,7 +59,7 @@ function chebyshevNeighborsFunc (point_)
 	const pushIfDefined = (vector_, dx_, dy_) =>
 	{
 		const p = PointFactory.fromPoint (point_, dx_, dy_);
-		if (p) vector_.push (p);
+		if (p && p.isValid) vector_.push (p);
 	}
 
 	pushIfDefined (n, -1, -1);
@@ -117,12 +113,6 @@ export class Point
 			this._y = data_.y;
 		else
 			this._y = 0;
-
-		this._w = data_.width ? data_.width : 1;
-		this._h = data_.height ? data_.height : 1;
-
-		// We don't want to create this array for every Point. It is created as needed and stored then
-		this._pointSet = new Array ();
 
 		// todo: Could represent difficult terrain, elevation, tile type (square/hex)...
 		this.data = data_.data;
@@ -193,24 +183,36 @@ export class Point
 
 	distToPoint (p_)     { return Point.lp (this, p_, this.metric); }
 	// Minimum distance from this point to a coordinate with width w_ and height h_
-	distToCoord (x_, y_, w_, h_)
+	distToCoord (x_, y_, w_ = 1, h_ = 1)
 	{
-		const ps1 = this.pointSet;
-		const ps2 = new Point ({
+		let min = Infinity;
+		let point = new Point ({
 			"x": x_,
 			"y": y_,
-			"width": w_,
-			"height": h_,
-			"data": undefined,
-			"metric": this.metric,
-		}).pointSet;
+			"w": w_,
+			"h": h_,
+			"data": null,
+			"metric": this.metric
+		})
 
-		return Math.min (...ps1.map (p1 =>
-			Math.min (...ps2.map (p2 =>
-				Point.lp (p1, p2, this.metric)))));
+		for (let i = 0; i < w_; ++i)
+		{
+			for (let j = 0; j < h_; ++j)
+			{
+				let dist = this.distToPoint (PointFactory.fromPoint (point, i, j));
+				if (dist < min) min = dist;
+			}
+		}
+
+		return min;
 	} 
-	equals (p_)          { return this.x === p_.x && this.y === p_.y; }
-	isNeighbor (p_)      { return this.distToPoint (p_) === 1; }
+	distToSegment (segment_)
+	{
+		return this.distToCoord (segment_.point.x, segment_.point.y, segment_.width, segment_.height);
+	}
+
+	equals (p_) { return this.x === p_.x && this.y === p_.y; }
+	isNeighbor (p_) { return this.distToPoint (p_) === 1; }
 
 	// If a token is at point P with rotation r_, this function returns the relative neighbor of that token in dir_ direction (e.g. forward, to the left, behind-left)
 	neighbor (dir_, r_)
@@ -236,10 +238,7 @@ export class Point
 
 	// Gets all of this point's neighbors
 	// This isn't particularly well-defined for the Euclidean metric
-	neighbors ()
-	{
-		return this.neighborsFunc (this);
-	}
+	neighbors () { return this.neighborsFunc (this); }
 
 	/* Deprecated */
 	// For a rotation_, find the neighboring Point of a target that is closest to this Point
@@ -254,7 +253,7 @@ export class Point
 		for (let n of pf.fromToken (target_).neighbors ())
 		{
 			const dist = Point.Euclidean(this, n);
-			const rDist = Math.abs (this.radialDistToPoint (n, rotation_));
+			const rDist = Math.abs (this.radialDistToPoint (n, rotation_, AngleTypes.RAD));
 
 			if (dist > maxDist) continue;
 			if (dist === maxDist && rDist > maxRDist) continue;
@@ -319,8 +318,6 @@ export class Point
 			this._w = changes_.w / this.scale;
 		if (changes_.h !== undefined)
 			this._h = changes_.h / this.scale;
-
-		this._pointSet = new Array ();
 	}
 
 	get x () { return this._x; }
@@ -329,46 +326,162 @@ export class Point
 	get px () { return this.x * this.scale; }
 	get py () { return this.y * this.scale; }
 	// Returns the offset of the point's center, in pixels
+	get cx () { return this.x + 0.5; }
+	get cy () { return this.y + 0.5; }
+	// Returns the offset of the point's center, in pixels
 	get cpx () { return (this.x + 0.5) * this.scale; }
 	get cpy () { return (this.y + 0.5) * this.scale; }
-
-	get width () { return this._w; }
-	get height () { return this._h; }
-	get pw () { return this.width * this.scale; }
-	get ph () { return this.height * this.scale; }
-
-	get pointSet ()
-	{
-		if (this._pointSet.length === 0)
-			for (let i = 0; i < this._w; ++i)
-				for (let j = 0; j < this._h; ++j)
-					this._pointSet.push (PointFactory.fromPoint (this, i, j));
-
-		return this._pointSet;
-	}
 
 	get scale () { return canvas.grid.size; }
 
 	get metric () { return this._metric; }
 	set metric (minkowskiParameter_) { this.metric = minkowskiParameter_; };
 
+	// todo: don't do this? return pixel pair instead?
+	// Don't use center points for calculations!!
+	get center () { return PointFactory.fromPoint (this, .5, .5); }
+
+	get id () { return this.x + "," + this.y; }
 	get isValid ()
 	{
 		if (this.x === NaN || this.y === NaN)
 			return false;
 		if (this.x < 0 || this.y < 0)
 			return false;
-		if (this.px >= canvas.dimensions.sceneWidth || this.py >= canvas.dimensions.sceneHeight)
+		if (this.px >= canvas.dimensions.width || this.py >= canvas.dimensions.height)
 			return false;
 
 		return true;
 	}
 };
 
+export class Segment
+{
+	constructor (point_, w_ = 1, h_ = 1)
+	{
+		this._point = point_;
+		this._w = w_;
+		this._h = h_;
+
+		this._pointSet = new Array ();
+
+		this._center = new Point ({
+			"x": this.point.x + this.width / 2,
+			"y": this.point.y + this.height / 2,
+			"data": this.point.data,
+			"metric": this.metric,
+			"neighborsFunc": this.point.neighborsFunc
+		})
+	}
+
+	contains (point_)
+	{
+		return ! (point_.x < this.point.x
+		       || point_.y < this.point.y
+		       || point_.x >= this.point.x + this.width
+		       || point_.y >= this.point.y + this.height);
+	}
+
+	distToCoord (x_, y_, w_ = 1, h_ = 1)
+	{
+		let min = Infinity;
+
+		for (let point of this.pointSet)
+		{
+			let dist = point.distToCoord (x_, y_, w_, h_);
+			if (dist < min) min = dist;
+		}
+
+		return min;
+	}
+
+	distToPoint (point_) { return this.distToCoord (point_.x, point_.y); }
+
+	distToSegment (segment_)
+	{
+		let min = Infinity;
+
+		for (let point of this.pointSet)
+		{
+			let dist = point.distToSegment (segment_);
+			if (dist < min) min = dist;
+		}
+
+		return min;
+	}
+
+	// Checks if two segments are equivalent (same origin and dimensions)
+	equals (seg_) { return this.id === seg_.id; }
+	// Checks if two segments share an origin
+	equalsNoSize (seg_) { return this.point.equals (seg_.point); }
+
+	radialDistToSegment (seg_, rotation_, angleType_)
+	{
+		return this.center.radialDistToPoint (seg_.center, rotation_, angleType_);
+	}
+
+	// todo: optimize
+	shared (segment_)
+	{
+		let ret = new Array ();
+
+		for (let point of this.pointSet)
+			if (segment_.contains (point))
+				ret.push (point);
+
+		return ret;
+	}
+	
+	// See Point.neighbor
+	neighbor (dir_, r_)
+	{
+		return new Segment (this.point.neighbor (dir_, r_), this.width, this.height);
+	}
+
+	update (changes_)
+	{
+		this.point.update (changes_);
+		this._pointSet = new Array ();
+	}
+
+	get center () { return this._center; }
+
+	get id () { return this.point.id + "," + this.width + "," + this.height; }
+	get isValid ()
+	{
+		if (! this.point.isValid)
+			return false;
+
+		const gridWidth = canvas.dimensions.width / canvas.dimensions.size;
+		const gridHeight = canvas.dimensions.height / canvas.dimensions.size;
+
+		if (this.point.x + this.width > gridWidth || this.point.y + this.height > gridHeight)
+			return false;
+
+		return true;
+	}
+	get metric () { return this._point.metric; }
+	get point () { return this._point; }
+	get pointSet ()
+	{ 
+		if (this._pointSet.length === 0)
+			for (let i = 0; i < this._w; ++i)
+				for (let j = 0; j < this._h; ++j)
+					this._pointSet.push (PointFactory.fromPoint (this._point, i, j));
+
+		return this._pointSet;
+	}
+
+	get width () { return this._h; }
+	get height () { return this._w; }
+	get pw () { return this.width * canvas.grid.size; }
+	get ph () { return this.height * canvas.grid.size; }
+}
+
 export class PointFactory
 {
 	// metric_ is a MinkowskiParameter
-	constructor (metric_)
+	constructor (metric_ = MinkowskiParameter.Manhattan)
 	{
 		this.metric = metric_;
 	}
@@ -378,70 +491,65 @@ export class PointFactory
 		const p = new Point ({
 			"x": point_.x + dx_,
 			"y": point_.y + dy_,
-			"width": point_.width,
-			"height": point_.height,
 			"data": point_.data,
 			"metric": point_.metric,
 			"neighborsFunc": point_.neighborsFunc
 		});
-		return p.isValid ? p : undefined;
+		return p.isValid ? p : null;
 	}
 
-	// Returns a new Point from x and y offsets: top left corner of canvas to top left corner of tile, in grid squares. If that Point is invalid, it returns undefined
-	fromCoord (x_, y_, w_, h_, data_)
+	static segmentFromPoint (point_, w_ = 1, h_ = 1) { return new Segment (point_, w_, h_); }
+
+	// Returns a new Point from x and y offsets: top left corner of canvas to top left corner of tile, in grid squares. If that Point is invalid, it returns null
+	fromCoord (x_, y_, data_)
 	{
 		const p = new Point ({
 			"x": x_,
 			"y": y_,
-			"width": w_,
-			"height": h_,
 			"data": data_,
 			"metric": this.metric
 		});
-		return p.isValid ? p : undefined;
+		return p.isValid ? p : null;
 	}
 	fromData (data_)
 	{
 		const p = new Point (data_);
-		return p.isValid ? p : undefined;
+		return p.isValid ? p : null;
 	}
-	fromPixel (px_, py_, w_, h_, data_)
+	fromPixel (px_, py_, data_ = null)
 	{
 		const p = new Point ({
 			"px": px_,
 			"py": py_,
-			"width": w_,
-			"height": h_,
 			"data": data_,
 			"metric": this.metric
 		});
-		return p.isValid ? p : undefined;
+		return p.isValid ? p : null;
 	}
-	fromToken (token_, data_)
+	// While the other factory methods may return null, this one will always return a Point
+	fromToken (token_, data_ = null)
 	{
 		return new Point ({
 			"px": token_.x,
 			"py": token_.y,
-			"width": getTokenWidth (token_),
-			"height": getTokenHeight (token_),
 			"data": data_,
 			"metric": this.metric
 		});
 	}
 
 	// Returns a Point located at the center of a token's location on the canvas, rather than the location of its top-left corner
-	// Useful for rotating tokens to "look" at each other, but not recommended for general use. A number of methods simply will not work, such as neighbors () or pointSet ()
-	centerFromToken (token_, data_)
+	// Useful for rotating tokens to "look" at each other, but not recommended for general use. A number of methods simply will not work
+	// todo: remove?
+	centerFromToken (token_, data_ = null)
 	{
-		return this.fromPixel (token_.x + token_.w / 2,
-				       token_.y + token_.h / 2,
-				       getTokenWidth (token_),
-				       getTokenHeight (token_),
-				       data_);
+		return this.fromPixel (token_.x + token_.w / 2, token_.y + token_.h / 2, data_);
 	}
 
-	// A token with dimensions > 1x1 is represented by an array of points for the purposes of los, collision detection, and path planning. The first element in the array represents the top-left Point
-	setFromData (data_) { return this.fromData (data_)?.pointSet; }
-	setFromCoord (x_, y_, w_, h_) { return this.fromCoord (x_, y_, w_, h_)?.pointSet; }
-	setFromToken (token_) { return this.fromToken (token_).pointSet; }
+	// A token with dimensions > 1x1 is represented by a grid Segment: an array of points. The first element in the array represents the top-left Point
+	segmentFromCoord (x_, y_, w_ = 1, h_ = 1) { return new Segment (this.fromCoord (x_, y_), w_, h_); }
+	segmentFromData (data_, w_ = 1, h_ = 1) { return new Segment (this.fromData (data_), w_, h_); }
+	segmentFromToken (token_)
+	{
+		return new Segment (this.fromToken (token_), getTokenWidth (token_), getTokenHeight (token_));
+	}
 };

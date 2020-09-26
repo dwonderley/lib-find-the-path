@@ -1,4 +1,4 @@
-import { Point, PointFactory, getTokenHeight, getTokenWidth, MinkowskiParameter } from "./point.js"
+import { Point, PointFactory, MinkowskiParameter, Segment } from "./point.js"
 import { FTPUtility } from "./utility.js"
 
 // Because apparently JS doesn't have this built in...
@@ -107,18 +107,17 @@ class Node
 		this._origin = origin_;
 		this._dest = dest_;
 		this.distTraveled = distTraveled_;
-		this.distToDest = Math.min (...this.origin.pointSet.map (p1 => {
-			return Math.min (...this.dest.pointSet.map (p2 => p1.distToPoint (p2)));
-		}));
+		this.distToDest = origin_.distToSegment (dest_);
 		this.cost = this.distTraveled + this.distToDest;
-
 		this.prev = prev_;
 	}
 
 	// Tokens of all sizes are represented by their upper-left point (index 0), a width, and a height
-	get dest () { return this._dest; }
+	get dest () { return this._dest.point; }
+	get destSeg () { return this._dest; }
 	// Tokens of all sizes are represented by their upper-left point (index 0), a width, and a height
-	get origin () { return this._origin; }
+	get origin () { return this._origin.point; }
+	get originSeg () { return this._origin; }
 
 	// Since all points in a set move as one, we can represent the entire collection with a single id
 	get id ()
@@ -139,34 +138,63 @@ export class Path
 	 * @private
 	 * @throws
 	*/
+	// Accepts a combination of:
+	// data_.origin:
+	// 1) Segment
+	// 2) Point with data_.width and data_.height >0
+	// 3) Point with data_.token
+	// data_.dest:
+	// 1) Segment
+	// 2) Point, assumes w/h = 1
 	constructor (data_)
 	{
-		if (! data_.origin || (! data_.origin instanceof Point)
-		    || ! data_.dest || ! data_.dest instanceof Point)
-			throw "FindThePath | Invalid Path initialization: bad start/goal Point";
-
 		const isValidNumber = (thing_) => { return thing_ !== undefined && typeof(thing_) === "number"; }
 		const isValidPosNumber = (thing_) => { return isValidNumber (thing_) && thing_ >= 0; }
+
+		if (! data_.origin || ! data_.dest)
+			throw "FindThePath | Invalid Path initialization: missing start/goal input";
+
+		if (data_.origin instanceof Point)
+		{
+			if (! data_.token && ! (isValidPosNumber (data_.width) && isValidPosNumber (data_.height)))
+				throw "FindThePath | Invalid Path initialization: must provide width/height or token";
+		}
+		else if (! data_.origin instanceof Segment
+			 || (! data_.dest instanceof Segment && ! data_.dest instanceof Point))
+		{
+			throw "FindThePath | Invalid Path initialization: bad start/goal Segment";
+		}
 
 		if (! isValidPosNumber (data_.movement))
 			throw "FindThePath | Invalid Path initialization: bad search range";
 
-		if (! data_.token && ! (isValidPosNumber (data_.width) && isValidPosNumber (data_.height)))
-			throw "FindThePath | Invalid Path initialization: must provide width/height or token";
+		if (data_.origin instanceof Segment)
+		{
+			this.origin = data_.origin;
+		}
+		else
+		{
+			if (data_.token)
+				this.origin = PointFactory.segmentFromToken (data_.token);
+			else
+				this.origin = PointFactory.segmentFromPoint (data_.origin, data_.width, data_.height);
+		}
 
-		this.origin = data_.origin;
-		this.dest = data_.dest;
+		if (data_.dest instanceof Segment)
+			this.dest = data_.dest;
+		else
+			this.dest = PointFactory.segmentFromPoint (data_.dest, 1, 1);
+
 		this.token = data_.token;
 		this.maxPathLength = data_.movement;
-
-		this.width = data_.width ? data_.width : getTokenWidth (this.token);
-		this.height = data_.height ? data_.height : getTokenHeight (this.token);
 
 		this._path = new Array ();
 
 		// Todo: make this a function accepting the token and movement left in path? Usually, tokens can move through allied spaces but cannot stop in them. As is, tokens cannot move through allied spaces at all.
 		this._collisionConfig = { checkCollision: true, token: this.token };
 		this._priorityMeasure = data_.priorityMeasure;
+
+		this._utility = new FTPUtility ({ collisionConfig: this._collisionConfig });
 
 		this.valid = false;
 	}
@@ -178,13 +206,16 @@ export class Path
 		let visited = new Map ();
 		let n = new Node (this.origin, this.dest, 0);
 
+		const width = n.originSeg.width;
+		const height = n.originSeg.height;
+
 		frontier.push (n);
 
 		while (frontier.length > 0)
 		{
 			n = frontier.pop ();
 
-			if (n.prev && ! FTPUtility.los (n.prev.origin, n.origin))
+			if (n.prev && ! this._utility.los (n.prev.originSeg, n.originSeg))
 				continue;
 
 			if (n.distToDest === 0)
@@ -194,9 +225,9 @@ export class Path
 			}
 
 			// Tokens with size > 1 have overlap when they move. We don't want them to colide with themselves
-			if (n.prev && n.origin.pointSet.filter (p => {
-				return ! n.prev.origin.pointSet.some (pp => pp.equals (p));
-			}).some (p => FTPUtility.collision (p, this._collisionConfig)))
+			if (n.prev && n.originSeg.pointSet.some (p => {
+				return ! n.prev.originSeg.contains (p) && this._utility.collision (n.originSeg);
+			}))
 			{
 				continue;
 			}
@@ -212,11 +243,14 @@ export class Path
  
 			// Since the goal point is checked for all points in the origin set against all points in the dest set, we only need to expand the origin node.
 			n.origin.neighbors ().map (p => {
-				return new Node (PointFactory.fromPoint (p),
-						 n.dest,
+				return new Node (PointFactory.segmentFromPoint (p, width, height),
+						 n.destSeg,
 						 n.distTraveled + 1,
 						 n);
 			}).filter (node => {
+				if (! node.originSeg.isValid)
+					return false;
+
 				const id = node.id;
 
 				if (visited.has (id))
@@ -243,7 +277,7 @@ export class Path
 	// Returns a subpath from the origin to the point on the path with distance dist_ away from the target
 	within (dist_)
 	{
-		return this._path.filter (e => { return e.distToDest >= dist_ }).map (n => { return n.origin; });
+		return this._path.filter (e => { return e.distToDest >= dist_ }).map (n => { return n.originSeg; });
 	}
 
 	get cost () { return this?.terminus.cost; }
@@ -277,14 +311,101 @@ export class PathManager
 		return p;
 	}
 
-	// A less general case of pathFromData. Finds a path between a source and destination Point. The origin_ has width_ and height_ in tiles. A valid path may be at most movement_ tiles long.
-	static async pathToPoint (origin_, dest_, movement_)
+	// Returns an unsorted Array of all Points within dist_ tiles of point_
+	// If using a Segment that represents a token, you must set collisionConfig_.token, or it will collide with itself, potentially returnning an empty set.
+	// To avoid this, use pointsWithinRangeOfToken (token_, dist_)
+	static async pointsWithinRange (seg_, dist_, collisionConfig_ = { checkCollision: true, token: null })
+	{
+		if (! seg_ instanceof Segment)
+		{
+			console.log ("FindThePath | Invalid starting segment for call to pointsWithinRange");
+			return ret;
+		}
+
+		if (! dist_ || typeof (dist_) !== "number" || dist_ < 0)
+		{
+			console.log ("FindThePath | Invalid range for call to pointsWithinRange");
+			return ret;
+		}
+
+		let frontier = new PriorityQueue ();
+		let visited = new Map ();
+		let n = { origin: seg_, prev: null, cost: 0 };
+
+		const width = n.origin.width;
+		const height = n.origin.height;
+
+		const getNodeId = (node_) => { return node_.origin.id; }
+
+		const priorityMeasure = (array_, item_) =>
+		{
+			for (let i = 0; i < array_.length; ++i)
+			{
+				if (array_[i].cost > item_.cost)
+				{
+					array_.splice (i, 0, item_);
+					return;
+				}
+			}
+			
+			array_.splice (array_.length, 0, item_);
+		}
+
+		frontier.push (n, priorityMeasure);
+
+		const utility = new FTPUtility ();
+
+		while (frontier.length > 0)
+		{
+			n = frontier.pop ();
+
+			if (n.prev && ! utility.los (n.prev.origin, n.origin))
+				continue;
+
+			// Tokens with size > 1 have overlap when they move. We don't want them to colide with themselves
+			if (n.prev && n.origin.pointSet.some (p => {
+				return ! n.prev.origin.contains (p)
+				       && utility.collision (n.origin, collisionConfig_);
+			}))
+			{
+				continue;
+			}
+
+			if (n.cost > dist_)
+				break;
+ 
+			const id = getNodeId (n);
+
+			// todo: this is disgusting. optimize...
+			if (visited.has (id))
+				continue;
+			else
+				visited.set (id, n);
+
+			// Since the goal point is checked for all points in the origin set against all points in the dest set, we only need to expand the origin node.
+			n.origin.point.neighbors ().map (p => {
+				//todo: variable cost tiles 
+				return { 
+					origin: PointFactory.segmentFromPoint (p, width, height),
+					prev: n,
+					cost: n.cost + 1
+				};
+			}).filter (node => node.origin.isValid).forEach (node => {
+				frontier.push (node, priorityMeasure);
+			});
+		}
+
+		let ret = new Array ();
+		visited.forEach ((v, k, m) => { ret.push ({ segment: v.origin, dist: v.cost })});
+		return ret;
+	}
+
+	// A less general case of pathFromData. Finds a path between a source and destination Segment. A valid path may be at most movement_ tiles long.
+	static async pathToSegment (origin_, dest_, movement_)
 	{
 		const p = new Path ({
 			"origin": origin_,
 			"dest": dest_,
-			"width": origin_.width,
-			"height": origin_.height,
 			"movement": movement_ ? movement_ : Infinity,
 			"token": null,
 		});
@@ -311,8 +432,8 @@ export class PathManager
 
 		// todo: support priority queue and collision settings
 		const p = new Path ({
-			"origin": this._pointFactory.fromToken (token_),
-			"dest": this._pointFactory.fromToken (target_),
+			"origin": this._pointFactory.segmentFromToken (token_),
+			"dest": this._pointFactory.segmentFromToken (target_),
 			"token": token_,
 			"movement": movement_,
 		});
@@ -338,6 +459,13 @@ export class PathManager
 	paths (id_) { return this._paths.get (id_); }
 	// Get the path from a token to a target
 	path (tokenId_, targetId_) { return this.paths (tokenId_)?.get (targetId_);}
+
+	async pointsWithinRangeOfToken (token_, dist_)
+	{
+		return await PathManager.pointsWithinRange (this._pointFactory.segmentFromToken (token_),
+							    dist_,
+							    { checkCollision: true, token: token_});
+	}
 };
 
 Hooks.on ("ready", () =>
@@ -359,4 +487,6 @@ Hooks.on ("ready", () =>
 
 	game.FindThePath.Manhattan.PathManager = new PathManager (MinkowskiParameter.Manhattan);
 	game.FindThePath.Manhattan.PointFactory = new PointFactory (MinkowskiParameter.Manhattan);
+
+	game.FindThePath.Utility = new FTPUtility ({ name: "GlobalFTPUtility" });
 });
