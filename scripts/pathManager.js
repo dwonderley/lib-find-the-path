@@ -191,10 +191,13 @@ export class Path
 		this._path = new Array ();
 
 		// Todo: make this a function accepting the token and movement left in path? Usually, tokens can move through allied spaces but cannot stop in them. As is, tokens cannot move through allied spaces at all.
-		this._collisionConfig = { checkCollision: true, token: this.token };
-		this._priorityMeasure = data_.priorityMeasure;
+		this._collision = data_.config.collision;
+		this._priorityMeasure = data_.config.priorityMeasure;
+		this._constrainVision = data_.config.constrainVision;
 
-		this._utility = new FTPUtility ({ collisionConfig: this._collisionConfig });
+		this._utility = new FTPUtility ({ collisionConfig: this._collision });
+		if (this.token)
+			this._utility.token = this.token;
 
 		this.valid = false;
 	}
@@ -205,6 +208,7 @@ export class Path
 		let frontier = new PriorityQueue ();
 		let visited = new Map ();
 		let n = new Node (this.origin, this.dest, 0);
+		const origin = n.origin;
 
 		const width = n.originSeg.width;
 		const height = n.originSeg.height;
@@ -215,11 +219,17 @@ export class Path
 		{
 			n = frontier.pop ();
 
+			if (this._constrainVision && n.prev && ! this._utility.losCenter (origin, n.originSeg))
+				continue;
+
 			if (n.prev && ! this._utility.los (n.prev.originSeg, n.originSeg))
 				continue;
 
 			if (n.distToDest === 0)
 			{
+				if (this._utility.collision (n.prev.originSeg, this._utility.defaultCollisionConfig ()))
+					continue;
+
 				this.valid = true;
 				break;
 			}
@@ -312,9 +322,9 @@ export class PathManager
 	}
 
 	// Returns an unsorted Array of all Points within dist_ tiles of point_
-	// If using a Segment that represents a token, you must set collisionConfig_.token, or it will collide with itself, potentially returnning an empty set.
+	// If using a Segment that represents a token, you must set collisionConfig_.whitelist, or it will collide with itself, potentially returnning an empty set.
 	// To avoid this, use pointsWithinRangeOfToken (token_, dist_)
-	static async pointsWithinRange (seg_, dist_, collisionConfig_ = { checkCollision: true, token: null })
+	static async pointsWithinRange (seg_, dist_, collisionConfig_ = { checkCollision: true, whitelist: new Array () })
 	{
 		if (! seg_ instanceof Segment)
 		{
@@ -364,8 +374,7 @@ export class PathManager
 
 			// Tokens with size > 1 have overlap when they move. We don't want them to colide with themselves
 			if (n.prev && n.origin.pointSet.some (p => {
-				return ! n.prev.origin.contains (p)
-				       && utility.collision (n.origin, collisionConfig_);
+				return ! n.prev.origin.contains (p) && utility.collision (n.origin, collisionConfig_);
 			}))
 			{
 				continue;
@@ -408,13 +417,23 @@ export class PathManager
 			"dest": dest_,
 			"movement": movement_ ? movement_ : Infinity,
 			"token": null,
+			"config": PathManager.defaultConfig (),
 		});
 		await p.findPath ();
 		return p;
 	}
 
+	static defaultConfig ()
+	{
+		return {
+			collision: { checkCollision: false, whitelist: new Array () },
+			priorityMeasure: null,
+			constrainVision: false,
+		}
+	}
+
 	// Finds a path between two tokens that takes no more than movement_ tiles and stores it. If a path does not exist, it stores the best path it found, but that path is not marked "valid." Path validity should be checked as needed.
-	async addToken (token_, target_, movement_)
+	async addToken (token_, target_, movement_, config_ = PathManager.defaultConfig ())
 	{
 		if (! this._paths.has (token_.id))
 			this._paths.set (token_.id, new Map ());
@@ -430,12 +449,17 @@ export class PathManager
 			tokenPaths.delete (target_.id);
 		}
 
-		// todo: support priority queue and collision settings
+		// remove before pushing
+		config_.collision.checkCollision = true;
+		if (config_.collision.whitelist.length === 0)
+			config_.collision.whitelist.push (token_);
+
 		const p = new Path ({
 			"origin": this._pointFactory.segmentFromToken (token_),
 			"dest": this._pointFactory.segmentFromToken (target_),
 			"token": token_,
 			"movement": movement_,
+			"config": config_
 		});
 
 		console.log ("FindThePath | Searching for path between tokens %s and %s", token_.id, target_.id);
@@ -464,7 +488,7 @@ export class PathManager
 	{
 		return await PathManager.pointsWithinRange (this._pointFactory.segmentFromToken (token_),
 							    dist_,
-							    { checkCollision: true, token: token_});
+							    { checkCollision: true, whitelist: new Array (token_) });
 	}
 };
 

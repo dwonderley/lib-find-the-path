@@ -13,7 +13,7 @@ export class FTPUtility
 		canvas.grid.addHighlightLayer(this._name);
 	}
 
-	defaultCollisionConfig () { return { checkCollision: true, token: null }; }
+	defaultCollisionConfig () { return { checkCollision: true, whitelist: new Array () }; }
 	defaultName () { return "FTPUtility"; }
 
 	clearHighlights () { canvas.grid.highlightLayers[this._name]?.clear (); }
@@ -24,11 +24,26 @@ export class FTPUtility
 			return false;
 	
 		const pf = new PointFactory (newSegment_.metric);
-		const curToken = collisionConfig_.token ? collisionConfig_.token : this.token;
-	
+
+		// Make a copy of the array
+		let whitelist = new Array ();
+		for (let item of collisionConfig_.whitelist)
+			whitelist.push (item);
+
+		if (this.token && ! whitelist.some (token => token.id === this.token.id))
+			whitelist.push (this.token);
+
+		const checkForToken = (id_, whitelist_) => {
+			for (let token of whitelist_)
+				if (id_ === token.id)
+					return true;
+
+			return false;
+		};
+
 		for (let token of canvas.tokens.placeables)
 		{
-			if (curToken && collisionConfig_.token.id === token.id)
+			if (checkForToken (token.id, whitelist))
 				continue;
 
 			const tokenSegment = pf.segmentFromToken (token);
@@ -127,6 +142,26 @@ export class FTPUtility
 		return true;
 	}
 	
+	// Checks line of sight between the centers of two segments
+	// Returns true if los is not blocked by a wall
+	losCenter (startSegment_, endSegment_)
+	{
+		if (! startSegment_ || startSegment_.equals (endSegment_)) 
+			return true;
+	
+		if (! endSegment_)
+			return false;
+	
+		if (! startSegment_.isValid || ! endSegment_.isValid)
+			return false;
+
+		const p1 = startSegment_.center;
+		const p2 = endSegment_.center;
+
+		return ! canvas.walls.checkCollision (new Ray({ x: p1.px, y: p1.py }, { x: p2.px, y: p2.py }),
+						      { blockMovement: false, blockSenses: true, mode: "any" });
+	}
+
 	partialLOS (oldSegment_, newSegment_)
 	{
 		if (! oldSegment_.isValid || ! newSegment_.isValid)
