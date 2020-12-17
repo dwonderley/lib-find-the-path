@@ -1,5 +1,11 @@
 # lib-find-the-path
 ## Changelog
+1.4.0
+<p>Added configuration to enable non-omniscient path planning. Added a method to determine line of sight for only vision-blocking walls (i.e. it ignores ethereal walls). Refactored configuration of path manager and utility class.</p>
+
+1.3.0
+<p>Refactored segments to provide better structure for eventual hex support.</p>
+
 1.2.0
 <ol>
 <li>Added FTPUtility class that exposes useful methods
