@@ -6,7 +6,7 @@ export class FTPUtility
 	constructor (data_)
 	{
 		this._path = data_?.path;
-		this._token = data_?.token;
+		this._tokenDoc = data_?.token?.document;
 		this.collisionConfig = data_?.collisionConfig ? data_.collisionConfig
 							      : this.defaultCollisionConfig ();
 		this._name = data_?.name ? data_.name : this.defaultName ();
@@ -30,12 +30,12 @@ export class FTPUtility
 		for (let item of collisionConfig_.whitelist)
 			whitelist.push (item);
 
-		if (this.token && ! whitelist.some (token => token.id === this.token.id))
-			whitelist.push (this.token);
+		if (this.tokenDoc && ! whitelist.some (token => token.document.id === this.tokenDoc.id))
+			whitelist.push (this.tokenDoc);
 
 		const checkForToken = (id_, whitelist_) => {
 			for (let token of whitelist_)
-				if (id_ === token.id)
+				if (id_ === token.document.id)
 					return true;
 
 			return false;
@@ -43,7 +43,7 @@ export class FTPUtility
 
 		for (let token of canvas.tokens.placeables)
 		{
-			if (checkForToken (token.id, whitelist))
+			if (checkForToken (token.document.id, whitelist))
 				continue;
 
 			const tokenSegment = pf.segmentFromToken (token);
@@ -176,22 +176,22 @@ export class FTPUtility
 	// between this rotation and movement
 	async moveTokenToSegment (segment_, rotateWait_ = 100)
 	{
-		if (! this.token)
+		if (! this.tokenDoc)
 			return false;
 
 		const pf = new PointFactory (segment_.metric);
-		const cur = pf.segmentFromToken (this.token);
+		const cur = pf.segmentFromToken (this.tokenDoc);
 
 		if (segment_.equals (cur))
 			return true;
 
 		// Calculate the angular distance to the destination grid space
-		const dTheta = cur.radialDistToSegment (segment_, this.token.data.rotation, AngleTypes.DEG);
+		const dTheta = cur.radialDistToSegment (segment_, this.tokenDoc.data.rotation, AngleTypes.DEG);
 
 		if (dTheta)
 		{
 			// Rotate the token to face the direction it moves in
-			await this.token.update ({ rotation: (this.token.data.rotation + dTheta) % 360 }).then (
+			await this.tokenDoc.update ({ rotation: (this.tokenDoc.data.rotation + dTheta) % 360 }).then (
 			(resolve, reject) => { 
 				// Wait between rotating and moving
 				return new Promise (resolve => setTimeout (resolve, dTheta / 360 * rotateWait_));
@@ -200,7 +200,7 @@ export class FTPUtility
 
 		let ok = true;
 
-		await this.token.update ({ x: segment_.point.px, y: segment_.point.py }).catch (err => {
+		await this.tokenDoc.update ({ x: segment_.point.px, y: segment_.point.py }).catch (err => {
 			ui.notifications.warn (err);
 			// It really isn't
 			ok = false;
@@ -220,7 +220,7 @@ export class FTPUtility
 			return false;
 
 		// Make sure the token still exists
-		const token = canvas.tokens.get (this.path.token?.id);
+		const token = canvas.tokens.get (this.path.token?.document.id);
 
 		if (! token)
 			return false;
@@ -262,6 +262,6 @@ export class FTPUtility
 
 	get path () { return this._path; }
 	set path (path_) { this._path = path_; }
-	get token () { return this._token; }
-	set token (token_) { this._token = token_; }
+	get tokenDoc () { return this._tokenDoc; }
+	set tokenDoc(tokenDoc_) { this._tokenDoc = tokenDoc_; }
 };
