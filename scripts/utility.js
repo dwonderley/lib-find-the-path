@@ -6,6 +6,7 @@ export class FTPUtility
 	constructor (data_)
 	{
 		this._path = data_?.path;
+		this._token = data_?.token;
 		this._tokenDoc = data_?.token?.document;
 		this.collisionConfig = data_?.collisionConfig ? data_.collisionConfig
 							      : this.defaultCollisionConfig ();
@@ -27,15 +28,15 @@ export class FTPUtility
 
 		// Make a copy of the array
 		let whitelist = new Array ();
-		for (let item of collisionConfig_.whitelist)
-			whitelist.push (item);
 
-		if (this.tokenDoc && ! whitelist.some (token => token.document.id === this.tokenDoc.id))
-			whitelist.push (this.tokenDoc);
+		if (this.tokenDoc)
+			whitelist.push (this.tokenDoc.id)
+		for (let id of collisionConfig_.whitelist)
+			whitelist.push (id);
 
 		const checkForToken = (id_, whitelist_) => {
-			for (let token of whitelist_)
-				if (id_ === token.document.id)
+			for (let tokenId of whitelist_)
+				if (id_ === tokenId)
 					return true;
 
 			return false;
@@ -262,6 +263,12 @@ export class FTPUtility
 
 	get path () { return this._path; }
 	set path (path_) { this._path = path_; }
+	get token () { return this._token; }
+	set token (token_)
+	{
+		this._token = token_;
+		this._tokenDoc = token_.document;
+	}
 	get tokenDoc () { return this._tokenDoc; }
 	set tokenDoc(tokenDoc_) { this._tokenDoc = tokenDoc_; }
 };
